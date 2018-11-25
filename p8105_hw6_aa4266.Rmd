@@ -49,6 +49,39 @@ fit_logistic_baltimore_white_OR =
   filter(term == "victim_racewhite") %>% 
   mutate(OR = exp(estimate), CI_OR_0.025 = OR - 1.96 * std.error, CI_OR_0.975 = OR + 1.96 * std.error) #95% CI, therefore alpha is 1.96
 
-  
+fit_logistic_baltimore_white_OR %>% 
+  knitr::kable(digits = 3)
+```
 
+Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing non-white victims to white victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
+
+```{r p1_all_cities_glm}
+fit_logistic_all_white_OR = 
+  hom_data %>% 
+  group_by(city_state) %>% 
+  nest() %>% 
+  mutate(models = map(data, ~glm(bin_disposition ~ victim_age + victim_sex + victim_race, data = ., family = binomial())), 
+         results = map(models, broom::tidy)) %>% 
+  select(-data, -models) %>% 
+  unnest() %>% 
+  filter(term == "victim_racewhite") %>% 
+  mutate(OR = exp(estimate), CI_OR_0.025 = OR - 1.96 * std.error, CI_OR_0.975 = OR + 1.96 * std.error) %>% #95% CI, therefore alpha is 1.96
+  arrange(desc(OR))
+  
+fit_logistic_all_white_OR %>% 
+  head() %>% 
+  knitr::kable()
+```
+
+The above table shows the top 6 cities with the highest odds ratio of solving homicides comparing non-white victims to white victims. 
+
+
+Following will be a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
+```{r p1_all_cities_glm_plot}
+fit_logistic_all_white_OR %>% 
+  mutate(city_state = as.factor(city_state), city_state = fct_reorder(city_state, desc(OR))) %>% 
+  ggplot(aes(x = city_state, y = OR)) +
+  geom_point() + 
+  geom_errorbar(aes(ymin = CI_OR_0.025, ymax = CI_OR_0.975)) +
+  theme(axis.text.x = element_text(color = "#993333", angle = 90, size = rel(0.8), hjust = 1))
 ```
