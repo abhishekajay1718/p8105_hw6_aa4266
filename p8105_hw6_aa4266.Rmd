@@ -1,0 +1,54 @@
+---
+title: "P8105_HW6_AA4266"
+author: "Abhishek Ajay (aa4266)"
+date: "November 25, 2018"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.width = 6,
+                      fig.asp = .6,
+                      out.width = "90%"
+                      )
+
+library(tidyverse)
+library(rvest)
+library(purrr)
+library(ggplot2)
+
+theme_set(theme_bw() + theme(legend.position = "bottom"))
+```
+
+#Problem 1
+
+Here we work on the homicides data from 50 large U.S. cities that has been gathered by The Washington Post.
+
+**Data Import**
+```{r p1_import}
+hom_data = 
+  read_csv("./data/homicide-data.csv") %>% 
+  mutate(city_state = paste(city, state, sep = ", "), 
+         disposition = as.factor(disposition),
+         bin_disposition = as.numeric(disposition == "Closed by arrest")) %>% 
+  filter(!(city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"))) %>% 
+  mutate(victim_race = as.factor(ifelse(victim_race == "White", "white", "non-white")), 
+         victim_age = as.numeric(victim_age))
+```
+In bin_disposition, **1** means, Closed by arrest and **0** means elsewise.
+
+Now we fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors. 
+
+
+```{r p1_baltimore_glm}
+fit_logistic_baltimore_white_OR = 
+  hom_data %>% 
+  filter(city_state == "Baltimore, MD") %>% 
+  glm(bin_disposition ~ victim_age + victim_sex + victim_race, data = ., family = binomial()) %>% 
+  broom::tidy() %>% 
+  filter(term == "victim_racewhite") %>% 
+  mutate(OR = exp(estimate), CI_OR_0.025 = OR - 1.96 * std.error, CI_OR_0.975 = OR + 1.96 * std.error) #95% CI, therefore alpha is 1.96
+
+  
+
+```
