@@ -16,6 +16,7 @@ library(tidyverse)
 library(rvest)
 library(purrr)
 library(ggplot2)
+library(broom)
 
 theme_set(theme_bw() + theme(legend.position = "bottom"))
 ```
@@ -31,42 +32,38 @@ hom_data =
   mutate(city_state = paste(city, state, sep = ", "), 
          disposition = as.factor(disposition),
          bin_disposition = as.numeric(disposition == "Closed by arrest")) %>% 
-  filter(!(city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"))) %>% 
-  mutate(victim_race = as.factor(ifelse(victim_race == "White", "white", "non-white")), 
+  filter(!(city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")),
+         victim_race != "Unknown") %>% 
+  mutate(victim_race = ifelse(victim_race == "White", "white", "non-white"),
+         victim_race = fct_relevel(victim_race, "white"),
          victim_age = as.numeric(victim_age))
 ```
-In bin_disposition, **1** means, Closed by arrest and **0** means elsewise.
+In bin_disposition, **1** means, Closed by arrest and **0** means elsewise. I removed the victims with Unknown races to avoid bias in the estimation.
 
 Now we fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors. 
 
-
 ```{r p1_baltimore_glm}
-fit_logistic_baltimore_white_OR = 
-  hom_data %>% 
+hom_data %>% 
   filter(city_state == "Baltimore, MD") %>% 
   glm(bin_disposition ~ victim_age + victim_sex + victim_race, data = ., family = binomial()) %>% 
-  broom::tidy() %>% 
-  filter(term == "victim_racewhite") %>% 
-  mutate(OR = exp(estimate), CI_OR_0.025 = OR - 1.96 * std.error, CI_OR_0.975 = OR + 1.96 * std.error) #95% CI, therefore alpha is 1.96
-
-fit_logistic_baltimore_white_OR %>% 
+  broom::tidy(exponentiate = TRUE, conf.int = TRUE) %>% 
+  filter(term == "victim_racenon-white") %>% 
+  select(OR = estimate, conf.low, conf.high) %>% 
   knitr::kable(digits = 3)
 ```
 
 Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing non-white victims to white victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
 
 ```{r p1_all_cities_glm}
-fit_logistic_all_white_OR = 
+fit_logistic_all_OR = 
   hom_data %>% 
   group_by(city_state) %>% 
   nest() %>% 
   mutate(models = map(data, ~glm(bin_disposition ~ victim_age + victim_sex + victim_race, data = ., family = binomial())), 
-         results = map(models, broom::tidy)) %>% 
+         results = map_df(.x = models, ~ broom::tidy(.x, exponentiate = TRUE, conf.int = TRUE))) %>% 
   select(-data, -models) %>% 
   unnest() %>% 
-  filter(term == "victim_racewhite") %>% 
-  mutate(OR = exp(estimate), CI_OR_0.025 = OR - 1.96 * std.error, CI_OR_0.975 = OR + 1.96 * std.error) %>% #95% CI, therefore alpha is 1.96
-  arrange(desc(OR))
+  filter(term == "victim_racenon-white") 
   
 fit_logistic_all_white_OR %>% 
   head() %>% 
