@@ -13,11 +13,11 @@ knitr::opts_chunk$set(echo = TRUE,
                       )
 
 library(tidyverse)
-library(rvest)
+library(modelr)
+library(mgcv)
 library(purrr)
 library(ggplot2)
 library(broom)
-
 theme_set(theme_bw() + theme(legend.position = "bottom"))
 ```
 
@@ -38,9 +38,12 @@ hom_data =
          victim_race = fct_relevel(victim_race, "white"),
          victim_age = as.numeric(victim_age))
 ```
-In bin_disposition, **1** means, Closed by arrest and **0** means elsewise. I removed the victims with Unknown races to avoid bias in the estimation.
 
-Now we fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors. 
+In bin_disposition, **1** means, Closed by arrest and **0** means elsewise. I removed the victims with Unknown races to avoid bias in the estimation. We could have involved the unknown victim races as non white, however, looking at the data, most of the entries with unknown race entries had other entries as unknown too. So, to remove biasness it seemed apt to just drop the race. 
+
+The race has been transformed to factor data type becuase we want to find the odds ratio of one in comparison to the other.
+
+Now we fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors for Baltimore, MD. We use logistic regression because our dependent variable is binary.  
 
 ```{r p1_baltimore_glm}
 hom_data %>% 
@@ -52,9 +55,9 @@ hom_data %>%
   knitr::kable(digits = 3)
 ```
 
-Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing non-white victims to white victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
+Now, the odds ratio is the odds of solving a homicide of a non-white individual/ no solving in comparison to white victims. Since our dependent variable is binary, we use logistic modelling. The tidying is done as follows.
 
-```{r p1_all_cities_glm}
+```{r p1_all_cities_glm, warning = FALSE}
 fit_logistic_all_OR = 
   hom_data %>% 
   group_by(city_state) %>% 
@@ -73,8 +76,7 @@ fit_logistic_all_OR %>%
 
 The above table shows the top 6 cities with the highest odds ratio of solving homicides comparing non-white victims to white victims. 
 
-
-Following will be a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
+The following will be a plot that shows the estimated ORs and CIs for each city. With cities organized according to estimated OR.
 ```{r p1_all_cities_glm_plot}
 fit_logistic_all_OR %>% 
   mutate(city_state = as.factor(city_state), 
@@ -82,5 +84,113 @@ fit_logistic_all_OR %>%
   ggplot(aes(x = city_state, y = OR)) +
   geom_point() + 
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
-  theme(axis.text.x = element_text(color = "#993333", angle = 90, size = rel(0.8), hjust = 1))
+  theme(axis.text.x = element_text(color = "#993333", angle = 90, size = rel(0.8), hjust = 1)) +
+  labs(
+    title = "Variation of OR with cities",
+    x = "City, State",
+    y = "Odds Ratio",
+    caption = "Data from The Washington Post"
+  )
 ```
+
+It is interesting to see the except for three cities, namely, Tampa, FL; Birmingham, AL; and Durham, NC, all the other cities had an odds ratio for solving a homicide of a non white in comparison to a white as less than 1. This means that in the top 50 cities, in 94% of the cities the chances of non-white case being solved is lesser than that of a white person's case. 
+
+However, under 95% confidence interval, the upper confidence limit shows that about 56% of the cities have chances of a non-white case being solved being lesser than a white person's case.
+
+#Problem 2
+
+The child birth weight data is imported and cleaned as follows.
+```{r p2_data_import, message = FALSE}
+child_bwt_data = 
+  read_csv("./data/birthweight.csv") %>% 
+  mutate(babysex = as.factor(babysex), 
+         frace = as.factor(frace),
+         mrace = as.factor(mrace),
+         malform = as.factor(malform),
+         partiy = as.factor(parity)) %>% 
+  select(-pnumlbw, -pnumsga) %>% 
+  select(bwt, babysex, everything())
+  #they are always constant and equal to 0 so can be dropped. 
+```
+
+In the above chunk, the babysex, father's race, mother's race, presence of malformations and parity are converted to factors. This is due to the categorical nature of the variable. Previous number of low birth weight babies and number of prior small for gestational age babies, i.e the *pnumlbw* and *pnumsga* columns respectively, are dropped since they are constant all through the data set and equal to 0.
+
+Here we propose a regression model for the birthweight using *stepwise regression* with *backward elimination*. This is a data driven model building-process where the predictors that lower the AIC (Akaike information criterion) the most from the starting AIC value are dropped sequentially after each run. 
+```{r p2_reg_model, results = FALSE}
+fit_mlr_child_bwt = lm(bwt ~ ., data = child_bwt_data) #data fitting
+
+#fit_mlr_child_bwt %>% 
+#  broom::tidy() %>% 
+#  knitr::kable()
+
+backward_elim_child_bwt_predictors =
+  step(fit_mlr_child_bwt, direction = "backward") %>% 
+  broom::tidy()#stepwise regression using backward elimination
+```
+
+The predictors finally chosen for our linear regression model are: 
+`r backward_elim_child_bwt_predictors %>% t() %>% knitr::kable()`
+
+So, the porposed regression model is:
+```{r p2_reg_model_proposed}
+new_fit_mlr_child_bwt = 
+  lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = child_bwt_data)
+
+new_fit_mlr_child_bwt %>% 
+  broom::tidy()
+```
+
+Showing a plot of model residuals against fitted values using add_predictions and add_residuals.
+```{r p2_reg_model_plot}
+child_bwt_data %>% 
+  add_predictions(new_fit_mlr_child_bwt) %>% 
+  add_residuals(new_fit_mlr_child_bwt) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.4) +
+  labs(
+    title = "Residuals against fitted values for the new model",
+    x = "Fitted Values", 
+    y = "Residuals"
+  )
+```
+
+###Comparison of the above model with the following two models: 
+
+MLR_1 : One using length at birth and gestational age as predictors (main effects only)
+
+MLR_2 : One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+In the following code chunk, cross validation is carried out followed by a plot to compare the spread of *root mean squares* in the three models.
+```{r p2_model_comparisons}
+fit_mlr_1 = lm(bwt ~ blength + gaweeks, data = child_bwt_data)
+fit_mlr_2 = lm(bwt ~ bhead*blength*babysex, data = child_bwt_data) #multiple regression with interaction
+
+#Cross Validating
+
+cv_df = 
+  crossv_mc(child_bwt_data, n = 100) %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble)) %>% 
+  mutate(proposed_mlr  = map(train, ~lm(bwt ~ parity + fincome + babysex + mheight + ppwt + gaweeks + smoken + delwt + mrace + blength + bhead, data = .x)),
+         mlr_1 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+         mlr_2 = map(train, ~lm(bwt ~ bhead*blength*babysex, data = .x))
+  ) %>% 
+  mutate(rmse_proposed  = map2_dbl(proposed_mlr,  test, ~rmse(model = .x, data = .y)),
+         rmse_mlr_1 = map2_dbl(mlr_1, test, ~rmse(model = .x, data = .y)),
+         rmse_mlr_2 = map2_dbl(mlr_2, test, ~rmse(model = .x, data = .y))
+  )
+
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  gather(key = model, value = rmse) %>% 
+  mutate(model = str_replace(model, "rmse_", ""),
+         model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin() + 
+  labs(
+    title = "Comparison of the proposed model with two alternative models",
+    x = "Models", 
+    y = "Root mean squares"
+  )
+```
+
+The proposed model using backward elimination stepwise regression is the clear winner here with the highest prediction accuracy. We see that the first suggested alternative bwt ~ blengths + gaweeks has the largest RMSE while the other suggested model is lower but still larger than the proposed model.
